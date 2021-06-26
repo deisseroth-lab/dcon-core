@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Convert a video in S3 to a presentable format by upsampling it to 60 FPS and linearly interpolating missing frames.
+
+# Parse arguments
+s3_path="$1"
+speedup="$2"
+
+# Set up constants
+out_frame_rate=60
+inv_speed=$(echo "scale=4; 1/${speedup}" | bc)
+tmpfile=$(mktemp)
+new_tmpfile="${tmpfile%.mp4}_${speedup}x.mp4"
+new_s3_path="${s3_path%.mp4}_${speedup}x.mp4"
+
+echo "Speeding ${s3_path} up by ${speedup}x and saving as ${new_s3_path}"
+
+# Grab from S3
+aws s3 cp $s3_path $tmpfile
+
+# Process video
+ffmpeg -i ${tmpfile} -filter:v "framerate=${out_frame_rate},setpts=$inv_speed*PTS" -r ${out_frame_rate} ${new_tmpfile}
+
+# Return to S3
+aws s3 cp ${new_tmpfile} ${new_s3_path}

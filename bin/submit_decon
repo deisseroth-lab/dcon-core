@@ -1,0 +1,133 @@
+#!/usr/bin/env python
+import argparse as ap
+import click
+import numpy as np
+from math import ceil
+import boto3
+from s3tools import get_keys, get_s3_img, put_s3_img, s3_dirname, s3_basename, s3_join
+from dcon.util import get_psf_info
+
+
+WARMUP_TIME_S = 20 * 60 # Per batch
+RUNTIME_S = 4 * 60 # Per frame
+MAX_BATCHES = 64
+
+
+def split_tasks(tasks, target_batch, max_batches=MAX_BATCHES):
+    N_tasks = len(tasks)
+    N_batches = min(ceil(N_tasks / target_batch), max_batches)
+    batches = np.array_split(tasks, N_batches)
+    return batches
+
+def main(in_prefix, psf_prefix, obj_xy, mags, n_iters, darkframe_prefix=None, out_dir='decon',
+         padding=0, kaiser_order=0.0, z_batch=2, restart=False, queue='spot', yes=False):
+    in_keys = [k for k in get_keys(in_prefix) if k[-4:] == ".tif"]
+    if restart:
+        if out_dir is None:
+            final_out_dir = s3_dirname(in_prefix)
+        else:
+            final_out_dir = s3_join(s3_dirname(in_prefix), out_dir)
+        out_prefix = s3_join(final_out_dir, "decon_")
+        out_keys = get_keys(out_prefix)
+        final_keys = []
+        for in_key in in_keys:
+            out_key = out_prefix + s3_basename(in_key)
+            if not (out_key in out_keys):
+                final_keys.append(in_key)
+
+        if len(final_keys) > 0:
+            in_keys = final_keys
+        else:
+            print("Found no incomplete deconvolutions to restart")
+            return None
+
+    psf_keys = get_keys(psf_prefix)
+
+    if len(in_keys) > 0:
+        print("{:d} images to process".format(len(in_keys)))
+    else:
+        raise ValueError("No images found at that s3 prefix")
+
+    batches = split_tasks(in_keys, target_batch=10)
+    batch_size = len(batches[0])
+    print("Distributing the frames into {:d} batches of ~{:d}".format(len(batches), batch_size))
+
+    if not yes:
+        click.confirm("Submit to batch?", default=True, abort=True)
+
+    client = boto3.client('batch')
+
+    # Set up parameters that don't depend on the frame
+    base_job_name = s3_dirname(in_keys[0]).rsplit("/", 1)[-1] + "-"
+
+    job_desc = {
+        'jobQueue': 'dcon-deconvolve-' + queue,
+        'jobDefinition': 'dcon-deconvolve',
+        'containerOverrides': {
+            'vcpus': int(2 * len(psf_keys)),
+            'memory': int(3 * 122 * 1024),
+            'resourceRequirements': [
+                {
+                    'value': str(8),
+                    'type': 'GPU'
+                }
+            ]
+        },
+        'timeout': {
+            'attemptDurationSeconds': WARMUP_TIME_S + batch_size * RUNTIME_S
+        }
+    }
+
+    for idx, batch in enumerate(batches):
+        cmd = ["python", "/workspace/dcon/decon_local.py",
+               *batch,
+               psf_prefix,
+               "-o", out_dir,
+               "--obj-xy", obj_xy,
+               "-m", *mags,
+               "-n", n_iters,
+               "-p", padding,
+               "--kaiser-order", kaiser_order,
+               "--z-batch", z_batch
+               ]
+        if darkframe_prefix:
+            cmd.extend(["-d", darkframe_prefix])
+        if restart:
+            cmd.extend(["--restart"])
+        cmd = [str(s) for s in cmd]
+
+        job_desc['jobName'] = base_job_name + s3_basename(batch[0]).split('.')[0] + "-" + s3_basename(batch[-1]).split('.')[0]
+        job_desc['containerOverrides']['command'] = cmd
+
+        client.submit_job(**job_desc)
+
+
+if __name__ == '__main__':
+    parser = ap.ArgumentParser("Dispatch deconvolution tasks to AWS Batch")
+    parser.add_argument('in_prefix', type=str, help="Prefix of frame keys in S3")
+    parser.add_argument('psf_prefix', type=str, help="Prefix PSF stacks in S3")
+    parser.add_argument('-d', '--dark_prefix', dest='darkframe_prefix', type=str,
+                        default=None, help="Single dark frame (post-averaged)")
+    parser.add_argument('-o', '--out-dir', dest='out_dir', type=str,
+                        default='decon', help="Output directory")
+    parser.add_argument('--obj-xy', dest='obj_xy', type=int, default=300,
+                        help="Width of reconstructed object")
+    parser.add_argument('-m', '--mags', dest='mags', type=float, default=[1.],
+                        nargs='+', help="Relative magnifications of each lens class")
+    parser.add_argument('-n', '--n-iters', dest='n_iters', type=int, default=25,
+                        help="Number of iterations of RL to perform")
+    parser.add_argument('-p', '--padding', dest='padding', type=int, default=0,
+                        help="Padding for convolutions")
+    parser.add_argument('-k', '--kaiser-order', dest='kaiser_order', type=float, default=0.0,
+                        help="Order of the Kaiser window to apply when rescaling volumes")
+    parser.add_argument('-z', '--z-batch', dest='z_batch', type=int, default=2,
+                        help="How many planes to FFT simultaneously (decrease if getting small OOMs)")
+    parser.add_argument('-r', '--restart', dest='restart', action='store_true',
+                        help="Skip if the output image already exists")
+    parser.add_argument('-q', '--queue', dest='queue', type=str, default='spot', choices=['spot', 'now'],
+                        help="Queue to use")
+    parser.add_argument('-y', '--yes', dest='yes', action='store_true',
+                        help="Don't show confirmation prompts")
+    args = parser.parse_args()
+
+    main(**vars(args))

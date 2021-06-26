@@ -1,0 +1,2 @@
+sudo nvidia-persistenced --persistence-mode
+watch -n 1 nvidia-smi

@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+import boto3
+import click
+
+JOB_STATUSES = ['SUBMITTED', 'PENDING', 'RUNNABLE', 'STARTING', 'RUNNING']
+
+@click.command()
+@click.argument('queue_name', type=str)
+@click.option('-t', '--terminate', is_flag=True, default=False,
+              help="Terminate all jobs instead of stopping queued ones")
+def clear_queue(queue_name, terminate):
+    client = boto3.client('batch')
+
+    jobs = []
+    for status in JOB_STATUSES:
+        response = client.list_jobs(jobQueue=queue_name, jobStatus=status)
+        jobs.extend(response['jobSummaryList'])
+
+    print("Found {:d} jobs".format(len(jobs)))
+
+    for job in jobs:
+        job_id = job['jobId']
+        job_status = job['status']
+
+        if job_status in ['SUBMITTED', 'PENDING', 'RUNNABLE']:
+            client.cancel_job(jobId=job_id, reason="Cancelled via scipt.")
+
+        if terminate and (job_status in ['STARTING', 'RUNNING']):
+            client.terminate_job(jobId=job_id, reason="Terminated via script.")
+
+if __name__ == '__main__':
+    clear_queue()

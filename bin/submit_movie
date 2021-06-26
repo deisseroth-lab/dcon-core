@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+import argparse as ap
+import click
+import numpy as np
+import boto3
+from s3tools import get_keys, get_s3_img, put_s3_img, s3_basename, s3_join, s3_dirname
+from dcon.util import get_psf_info
+
+
+CONCURRENCY = 48
+CHUNKSIZE = 4
+WARMUP_TIME_S = 120 # Once
+RUNTIME_S = 6 # Per frame
+BASE_MEM = 16 * 1024 # MB
+FRAME_MEM = 6 * 4 * 768**2 * 250 // 1024**2 # MB / worker
+
+
+def main(vol_prefix, movie_types, fs=20.0, dxy=1.121, dz=1.5, imsize=1000, crop_xy=512, crop_z=200, preset='medium', crf=16,
+         yes=False):
+    vol_keys = [k for k in get_keys(vol_prefix) if k[-4:] == ".tif"]
+    t_needed = WARMUP_TIME_S + len(vol_keys) * RUNTIME_S
+    mem_needed = BASE_MEM + FRAME_MEM * CONCURRENCY
+
+    print("{:d} volumes found".format(len(vol_keys)))
+    print("Requesting {:d}s runtime and {:d}MB memory".format(t_needed, mem_needed))
+    print("Making movies: {:s}".format(str(movie_types)))
+
+    if not yes:
+        click.confirm("Submit to batch?", default=True, abort=True)
+
+    client = boto3.client('batch')
+
+    # Set up parameters
+    job_desc = {
+        'jobQueue': 'dcon-movie-spot',
+        'jobDefinition': 'dcon-movie',
+        'containerOverrides': {
+            'vcpus': CONCURRENCY,
+            'memory': mem_needed
+        },
+        'timeout': {
+            'attemptDurationSeconds': t_needed
+        },
+        'jobName': s3_basename(vol_prefix[5:]).replace('/', '-')
+    }
+    cmd = ["python", "/workspace/dcon/dcon/make_movie.py",
+           vol_prefix,
+           "--fs", fs,
+           "--dxy", dxy,
+           "--dz", dz,
+           "--imsize", imsize,
+           "--crop-xy", crop_xy,
+           "--crop-z", crop_z,
+           "--preset", preset,
+           "--crf", crf
+    ]
+
+    if movie_types:
+        for movie_type in movie_types:
+            cmd += ["-t", movie_type]
+
+    cmd = [str(s) for s in cmd]
+    job_desc['containerOverrides']['command'] = cmd
+
+    print("Submitting command...")
+    print(" ".join(cmd))
+
+    client.submit_job(**job_desc)
+
+
+if __name__ == '__main__':
+    parser = ap.ArgumentParser("Dispatch volume movie creation tasks to AWS Batch")
+    parser.add_argument('vol_prefix', type=str, help="Prefix of volume keys in S3")
+    parser.add_argument('-t', '--type', dest='movie_types', action='append')
+    parser.add_argument('-f', '--fs', dest='fs', type=float, default=20.0,
+                        help="Acquisition rate of the frames")
+    parser.add_argument('-x', '--dxy', dest='dxy', type=float, default=1.121,
+                        help="Lateral sampling frequency in microns")
+    parser.add_argument('-z', '--dz', dest='dz', type=float, default=1.5,
+                        help="Axial sampling frequency in microns")
+    parser.add_argument('-s', '--imsize', dest='imsize', type=int, default=720,
+                        help="Width in pixels of the output movie")
+    parser.add_argument('--crop-xy', dest='crop_xy', type=int, default=512,
+                        help="Crop the lateral dimensions down to this")
+    parser.add_argument('--crop-z', dest='crop_z', type=int, default=200,
+                        help="Crop the depth dimension down to this")
+    parser.add_argument('-p', '--preset', dest='preset', type=str, default='medium',
+                        help="Quality/size preset to use in ffmpeg")
+    parser.add_argument('-q', '--crf', dest='crf', type=int, default=16,
+                        help="Encoder quality. 0 is lossless, 16 is 'visually lossless'.")
+    parser.add_argument('-y', '--yes', dest='yes', action='store_true',
+                        help="Don't show confirmation prompts")
+    args = parser.parse_args()
+    main(**vars(args))

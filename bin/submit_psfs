@@ -1,0 +1,61 @@
+#!/usr/bin/env python
+import click
+import numpy as np
+import boto3
+from s3tools import get_keys, get_s3_img, put_s3_img, s3_basename, s3_join, s3_dirname
+from dcon.util import get_psf_info
+
+
+@click.command()
+@click.argument('psf_prefix')
+@click.argument('dark_prefix', default=None)
+@click.argument('centers_key', default="s3://xlfm-dcon/S20_centers.csv")
+@click.option('-o', '--out-dir', 'out_dir', type=str, default="")
+@click.option('-c', '--channels', 'channels', type=int, default=1)
+@click.option('-r', '--rel-rad', 'rel_rad', type=float, default=1.0)
+@click.option('-y', '--yes', 'yes', is_flag=True, default=False)
+def main(psf_prefix, dark_prefix, centers_key, out_dir, channels, rel_rad, yes):
+    psf_keys = get_keys(psf_prefix)
+    dark_keys = get_keys(dark_prefix)
+    centers_keys = get_keys(centers_key)
+
+    print("{:d} PSFs found".format(len(psf_keys)))
+    print("{:d} dark frames found".format(len(dark_keys)))
+    if len(centers_keys) == 1:
+        print("The centers file was found")
+    else:
+        raise ValueError("Centers file not found")
+
+    if not yes:
+        click.confirm("Submit to batch?", default=True, abort=True)
+
+    client = boto3.client('batch')
+
+    # Set up parameters
+    job_desc = {
+        'jobQueue': 'dcon-psfs-now',
+        'jobDefinition': 'dcon-psfs',
+        'containerOverrides': {},
+        'jobName': s3_basename(psf_prefix[5:]).replace('/', '-')
+    }
+    cmd = [
+        "python", "/workspace/dcon/dcon/clean_psfs.py",
+        psf_prefix,
+        dark_prefix,
+        centers_key,
+        "--channels", channels,
+        "--rel-rad", rel_rad
+    ]
+    if out_dir is not "":
+        cmd.extend(["--out-dir", out_dir])
+    cmd = [str(s) for s in cmd]
+    job_desc['containerOverrides']['command'] = cmd
+
+    print("Submitting command...")
+    print(" ".join(cmd))
+
+    client.submit_job(**job_desc)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,35 @@
+#!/usr/bin/env python
+import click
+import numpy as np
+from tifffile import imread, imsave
+
+from glob import glob
+from os.path import dirname, join
+
+
+@click.command()
+@click.argument('darkframe_dirs', type=str, nargs=-1)
+@click.option('-r', '--reduction', 'reduction', type=click.Choice(['median', 'mean']), required=False)
+def make_darkframe(darkframe_dirs, reduction):
+    for darkframe_dir in darkframe_dirs:
+        darkframe_paths = glob(join(darkframe_dir, "*.tif"))
+        print("{:d} dark frames found".format(len(darkframe_paths)))
+        darkframe_stack = np.stack([imread(path) for path in darkframe_paths], axis=0)
+
+        if reduction is None or reduction == 'median':
+            darkframe = np.median(darkframe_stack, axis=0)
+        elif reduction == 'mean':
+            darkframe = np.mean(darkframe_stack, axis=0)
+        else:
+            raise ValueError("'reduction' must be one of 'median' or 'mean'")
+
+        darkframe = darkframe.astype(darkframe_stack.dtype)
+        output_path = join(dirname(darkframe_paths[0]), "darkframe.tif")
+        print("Saving darkframe to {:s}".format(output_path))
+        imsave(output_path, darkframe, compress=6)
+
+    return 0
+
+
+if __name__ == '__main__':
+    make_darkframe()

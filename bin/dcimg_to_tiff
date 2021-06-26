@@ -1,0 +1,67 @@
+#!/usr/bin/env python
+import numpy as np
+import click
+from dcimg import DCIMGFile
+from natsort import natsorted
+from tifffile import imsave
+from tqdm import tqdm, trange
+
+from glob import glob
+from multiprocessing import Pool, cpu_count
+from os import remove
+from os.path import join
+from time import sleep
+
+
+POLL_INT = 2
+TIFF_FILE_FMT = "img_{:06d}.tif"
+
+
+@click.command()
+@click.argument('input_dirs', type=str, nargs=-1)
+@click.option('--flip/--no-flip', default=False)
+@click.option('--delete/--no-delete', default=False)
+def main(input_dirs, flip, delete):
+    with Pool(cpu_count() - 1, maxtasksperchild=10) as pool:
+        for input_dir in tqdm(input_dirs, desc="Folder"):
+            dcimg_filenames = natsorted(glob(join(input_dir, "*.dcimg")))
+            Ch = len(dcimg_filenames)
+            if Ch < 1:
+                raise ValueError("No .dcimg files found")
+            tqdm.write("{:d} channels detected".format(Ch))
+
+            dcimg_files = [DCIMGFile(fn) for fn in dcimg_filenames]
+            if flip:
+                dcimg_files = dcimg_files[::-1]
+            T = dcimg_files[0].nfrms
+            results = []
+
+            for t in trange(T, leave=False, desc="Queueing"):
+                ch_stack = np.stack([f[t] for f in dcimg_files], axis=0)
+                tiff_filename = TIFF_FILE_FMT.format(t)
+                tiff_path = join(input_dir, tiff_filename)
+                result = pool.apply_async(imsave, args=(tiff_path, ch_stack), kwds={'compress':6})
+                results.append(result)
+
+            for dcimg_file in dcimg_files:
+                dcimg_file.close()
+                
+            del dcimg_files
+            num_ready = 0
+
+            with tqdm(total=T, leave=False, desc="Finishing") as pbar:
+                while num_ready < T:
+                    num_ready = np.count_nonzero([result.ready() for result in results])
+                    pbar.update(num_ready - pbar.n)
+                    sleep(POLL_INT)
+
+            if delete:
+                for dcimg_filename in dcimg_filenames:
+                    remove(dcimg_filename)
+
+        pool.close()
+        pool.join()
+
+
+if __name__ == '__main__':
+    main()

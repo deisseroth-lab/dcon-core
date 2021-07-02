@@ -2,7 +2,7 @@
 from setuptools import setup
 
 setup(
-    name="dcon",
+    name="dcon-core",
     description="Deconvolve aperture plane-space light fields",
     license="MIT",
     author="Noah Young",

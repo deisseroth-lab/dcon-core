@@ -1,4 +1,4 @@
-name: dcon
+name: dcon-core
 channels:
   - pytorch
   - conda-forge

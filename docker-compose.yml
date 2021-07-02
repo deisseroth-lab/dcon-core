@@ -4,22 +4,22 @@ services:
     build:
       dockerfile: deconvolve/Dockerfile
     runtime: nvidia
-    image: 005425916727.dkr.ecr.us-west-2.amazonaws.com/deisseroth-lab/dcon-deconvolve:latest
+    image: public.ecr.aws/d1v4a7q2/dcon-deconvolve:latest
     volumes:
-      - ..:/workspace/dcon
+      - ..:/workspace/dcon-core
 
   movie:
     build:
       dockerfile: movie/Dockerfile
-    image: 005425916727.dkr.ecr.us-west-2.amazonaws.com/deisseroth-lab/dcon-movie:latest
+    image: public.ecr.aws/d1v4a7q2/dcon-movie:latest
     volumes:
-      - ..:/workspace/dcon
+      - ..:/workspace/dcon-core
       - $HOME/.aws/credentials:/root/.aws/credentials
 
   psfs:
     build:
       dockerfile: psfs/Dockerfile
-    image: 005425916727.dkr.ecr.us-west-2.amazonaws.com/deisseroth-lab/dcon-psfs:latest
+    image: public.ecr.aws/d1v4a7q2/dcon-psfs:latest
     volumes:
-      - ..:/workspace/dcon
+      - ..:/workspace/dcon-core
       - $HOME/.aws/credentials:/root/.aws/credentials

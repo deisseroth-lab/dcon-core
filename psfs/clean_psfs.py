@@ -150,7 +150,7 @@ def plot_class_stacks(stacks, out_dir):
     plt.figure(figsize=(20, 20))
     faces3d(stacks.sum(axis=(0, 1)), vmin=0, cmap='inferno')
     put_s3_fig(out_path)
-    
+
 def plot_z_distribution(stacks, dxy, dz, out_dir):
     out_path = join(out_dir, "z_distribution.png")
     colors = ['c', 'g', 'm', 'r']
@@ -158,7 +158,7 @@ def plot_z_distribution(stacks, dxy, dz, out_dir):
     pal = sns.color_palette(colors)
     Ch, C, Z, X, Y = stacks.shape
     z_mid_um = Z * dz / 2
-    
+
     projections = stacks.max(axis=-2)[:,:,::-1,:]
     cdx = np.arange(Ch * C).reshape((Ch, C))
     cm = np.zeros((Z, Y, 3))
@@ -167,7 +167,7 @@ def plot_z_distribution(stacks, dxy, dz, out_dir):
             color = pal[cdx[ch,c]]
             psf = projections[ch,c]
             cm += np.stack([psf * c for c in color], axis=-1)
-    
+
     scale = np.max(cm)
 
     fig, ax = plt.subplots(1, 1, figsize=(20, aspect * 2.5))
@@ -177,14 +177,14 @@ def plot_z_distribution(stacks, dxy, dz, out_dir):
     ax.axhline(z_mid_um - CH_OFFSET_UM, ls='--', c='gray')
     put_s3_fig(out_path)
 
-    
+
 @click.command()
-@click.argument('psf_prefix')
-@click.argument('dark_prefix', default=None)
-@click.argument('centers_key', default="s3://xlfm-dcon/S20_centers.csv")
-@click.option('-o', '--out-dir', 'out_dir', type=str, default="")
-@click.option('-c', '--channels', 'channels', type=int, default=1)
-@click.option('-r', '--rel-rad', 'rel_rad', type=float, default=1.0)
+@click.argument('psf_prefix', help="Full S3 path prefix that will match all the PSF sub-stacks.")
+@click.argument('dark_prefix', default=None, help="Full S3 path prefix that will match all PSF dark-stacks.")
+@click.argument('centers_key', help="Full S3 path of the centers.csv file.")
+@click.option('-o', '--out-dir', 'out_dir', type=str, default="", help="Output sub-directory name in S3.")
+@click.option('-c', '--channels', 'channels', type=int, default=1, help="Number of cameras.")
+@click.option('-r', '--rel-rad', 'rel_rad', type=float, default=1.0, help="How much of the expected single-lenslet image to crop.")
 def clean_psfs(psf_prefix, dark_prefix, centers_key, out_dir, channels, rel_rad):
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)

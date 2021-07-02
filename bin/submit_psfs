@@ -7,12 +7,12 @@ from dcon.util import get_psf_info
 
 
 @click.command()
-@click.argument('psf_prefix')
-@click.argument('dark_prefix', default=None)
-@click.argument('centers_key', default="s3://xlfm-dcon/S20_centers.csv")
-@click.option('-o', '--out-dir', 'out_dir', type=str, default="")
-@click.option('-c', '--channels', 'channels', type=int, default=1)
-@click.option('-r', '--rel-rad', 'rel_rad', type=float, default=1.0)
+@click.argument('psf_prefix', help="Full S3 path prefix that will match all the PSF sub-stacks.")
+@click.argument('dark_prefix', default=None, help="Full S3 path prefix that will match all PSF dark-stacks.")
+@click.argument('centers_key', help="Full S3 path of the centers.csv file.")
+@click.option('-o', '--out-dir', 'out_dir', type=str, default="", help="Output sub-directory name in S3.")
+@click.option('-c', '--channels', 'channels', type=int, default=1, help="Number of cameras.")
+@click.option('-r', '--rel-rad', 'rel_rad', type=float, default=1.0, help="How much of the expected single-lenslet image to crop.")
 @click.option('-y', '--yes', 'yes', is_flag=True, default=False)
 def main(psf_prefix, dark_prefix, centers_key, out_dir, channels, rel_rad, yes):
     psf_keys = get_keys(psf_prefix)

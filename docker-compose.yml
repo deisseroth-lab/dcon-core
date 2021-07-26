@@ -2,24 +2,27 @@ version: '2.3'
 services:
   deconvolve:
     build:
+      context: .
       dockerfile: deconvolve/Dockerfile
     runtime: nvidia
     image: public.ecr.aws/d1v4a7q2/dcon-deconvolve:latest
     volumes:
-      - ..:/workspace/dcon-core
+      - .:/workspace/dcon-core
 
   movie:
     build:
+      context: .
       dockerfile: movie/Dockerfile
     image: public.ecr.aws/d1v4a7q2/dcon-movie:latest
     volumes:
-      - ..:/workspace/dcon-core
+      - .:/workspace/dcon-core
       - $HOME/.aws/credentials:/root/.aws/credentials
 
   psfs:
     build:
+      context: .
       dockerfile: psfs/Dockerfile
     image: public.ecr.aws/d1v4a7q2/dcon-psfs:latest
     volumes:
-      - ..:/workspace/dcon-core
+      - .:/workspace/dcon-core
       - $HOME/.aws/credentials:/root/.aws/credentials
